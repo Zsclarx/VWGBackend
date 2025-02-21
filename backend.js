@@ -11,7 +11,7 @@ const PORT = 5001;
 // Middleware
 app.use(bodyParser.json());
 app.use(cors({
-  origin: ['https://vwg-frontend.vercel.app', 'http://localhost:3000' , 'https://vwg-frontend-alpha.vercel.app/']
+  origin: ['https://vwg-frontend.vercel.app', 'http://localhost:3000' , 'https://vwg-frontend-alpha.vercel.app']
 }));
 
 // Helper function to get the Excel file path based on year and file number
