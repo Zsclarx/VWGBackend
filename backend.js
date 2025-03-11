@@ -162,27 +162,36 @@ app.get("/api/getFiles/:year", authenticateToken, async (req, res) => {
   }
 });
 
-// Fetch data for a specific file
 app.get("/api/getPBUData/:excelId", authenticateToken, async (req, res) => {
   const { excelId } = req.params;
   const userId = req.user.id;
   try {
-    const results = await sql`
-      SELECT ed.field_key, ed.field_value 
-      FROM excel_data ed
-      JOIN excel_sheets es ON ed.excel_id = es.excel_id
-      WHERE ed.excel_id = ${excelId} AND es.user_id = ${userId}
+    // Fetch highlightRows from excel_sheets
+    const sheetResult = await sql`
+      SELECT highlight_rows 
+      FROM excel_sheets 
+      WHERE excel_id = ${excelId} AND user_id = ${userId}
     `;
-    if (results.length === 0) {
+    if (sheetResult.length === 0) {
       return res.status(404).json({
         error: `No data found for Excel ID ${excelId} or unauthorized access.`,
       });
     }
-    const jsonData = results.map((row) => ({
+    const highlightRows = sheetResult[0].highlight_rows || [];
+
+    // Fetch cell data from excel_data
+    const dataResults = await sql`
+      SELECT field_key, field_value 
+      FROM excel_data 
+      WHERE excel_id = ${excelId}
+    `;
+    const jsonData = dataResults.map((row) => ({
       field_key: row.field_key,
       field_value: row.field_value,
     }));
-    res.json({ data: jsonData });
+
+    // Return both data and highlightRows
+    res.json({ data: jsonData, highlightRows });
   } catch (error) {
     console.error("Error fetching PBU data:", error);
     res.status(500).json({ error: "Error fetching Excel data from database." });
@@ -192,15 +201,21 @@ app.get("/api/getPBUData/:excelId", authenticateToken, async (req, res) => {
 // Save data to database
 app.post("/api/saveFiles", authenticateToken, async (req, res) => {
   const userId = req.user.id;
-  const jsonData = req.body.data; // Expecting [{field_key: "key", field_value: "value"}, ...]
-  if (!jsonData || jsonData.length === 0) {
+  const { data, highlightRows } = req.body; // Expecting { data: [...], highlightRows: [...] }
+  if (!data || data.length === 0) {
     return res.status(400).json({ error: "Invalid or empty data provided." });
   }
   try {
-    const sheetResult = await sql`INSERT INTO excel_sheets (user_id) VALUES (${userId}) RETURNING excel_id`;
+    // Insert into excel_sheets with highlightRows
+    const sheetResult = await sql`
+      INSERT INTO excel_sheets (user_id, highlight_rows) 
+      VALUES (${userId}, ${highlightRows ? JSON.stringify(highlightRows) : '[]'}) 
+      RETURNING excel_id
+    `;
     const excelId = sheetResult[0].excel_id;
 
-    const dataToInsert = jsonData.map((row) => ({
+    // Insert cell data into excel_data
+    const dataToInsert = data.map((row) => ({
       excel_id: excelId,
       field_key: row.field_key,
       field_value: row.field_value,
