@@ -291,7 +291,10 @@ app.get("/api/getDraft", authenticateToken, async (req, res) => {
     if (sheetResult.length === 0) {
       return res.status(404).json({ error: "Draft not found or unauthorized access." });
     }
-    const highlightRows = sheetResult[0].highlight_rows || [];
+
+    const highlightRows = sheetResult[0].highlight_rows
+  ? JSON.parse(sheetResult[0].highlight_rows)
+  : [];
 
     const dataResults = await sql`
       SELECT field_key, field_value
