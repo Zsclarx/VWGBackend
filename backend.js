@@ -108,7 +108,7 @@ app.post("/login", async (req, res) => {
     res.json({ token });
   } catch (error) {
     console.error("Error during login:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status  (500).json({ message: "Internal server error" });
   }
 });
 
@@ -201,20 +201,18 @@ app.get("/api/getPBUData/:excelId", authenticateToken, async (req, res) => {
 // Save data to database
 app.post("/api/saveFiles", authenticateToken, async (req, res) => {
   const userId = req.user.id;
-  const { data, highlightRows } = req.body; // Expecting { data: [...], highlightRows: [...] }
+  const { data, highlightRows } = req.body;
   if (!data || data.length === 0) {
     return res.status(400).json({ error: "Invalid or empty data provided." });
   }
   try {
-    // Insert into excel_sheets with highlightRows
     const sheetResult = await sql`
-      INSERT INTO excel_sheets (user_id, highlight_rows) 
-      VALUES (${userId}, ${highlightRows ? JSON.stringify(highlightRows) : '[]'}) 
+      INSERT INTO excel_sheets (user_id, highlight_rows)
+      VALUES (${userId}, ${highlightRows ? JSON.stringify(highlightRows) : '[]'})
       RETURNING excel_id
     `;
     const excelId = sheetResult[0].excel_id;
 
-    // Insert cell data into excel_data
     const dataToInsert = data.map((row) => ({
       excel_id: excelId,
       field_key: row.field_key,
@@ -222,12 +220,97 @@ app.post("/api/saveFiles", authenticateToken, async (req, res) => {
     }));
     await sql`INSERT INTO excel_data ${sql(dataToInsert)}`;
 
-    res.json({ success: true, message: "Data saved successfully", excelId });
+    // Clear the draft
+    await sql`UPDATE users SET draft_excel_id = NULL WHERE id = ${userId}`;
+
+    res.json({ success: true, message: "File saved successfully", excelId });
   } catch (error) {
     console.error("Error saving data:", error);
     res.status(500).json({ error: "Error saving data to the database." });
   }
 });
+
+app.post("/api/saveDraft", authenticateToken, async (req, res) => {
+  const userId = req.user.id;
+  const { data, highlightRows } = req.body;
+  if (!data || data.length === 0) {
+    return res.status(400).json({ error: "Invalid or empty data provided." });
+  }
+  try {
+    // Check if user already has a draft
+    const userResult = await sql`SELECT draft_excel_id FROM users WHERE id = ${userId}`;
+    const draftExcelId = userResult[0]?.draft_excel_id;
+
+    let excelId;
+    if (draftExcelId) {
+      // Update existing draft: delete old data and reuse excel_id
+      excelId = draftExcelId;
+      await sql`DELETE FROM excel_data WHERE excel_id = ${excelId}`;
+    } else {
+      // Create new draft
+      const sheetResult = await sql`
+        INSERT INTO excel_sheets (user_id, highlight_rows)
+        VALUES (${userId}, ${highlightRows ? JSON.stringify(highlightRows) : '[]'})
+        RETURNING excel_id
+      `;
+      excelId = sheetResult[0].excel_id;
+      await sql`UPDATE users SET draft_excel_id = ${excelId} WHERE id = ${userId}`;
+    }
+
+    // Insert new draft data
+    const dataToInsert = data.map((row) => ({
+      excel_id: excelId,
+      field_key: row.field_key,
+      field_value: row.field_value,
+    }));
+    await sql`INSERT INTO excel_data ${sql(dataToInsert)}`;
+
+    res.json({ success: true, message: "Draft saved successfully", excelId });
+  } catch (error) {
+    console.error("Error saving draft:", error);
+    res.status(500).json({ error: "Error saving draft to the database." });
+  }
+});
+
+
+// **New Endpoint: Get Draft**
+app.get("/api/getDraft", authenticateToken, async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const userResult = await sql`SELECT draft_excel_id FROM users WHERE id = ${userId}`;
+    const draftExcelId = userResult[0]?.draft_excel_id;
+    if (!draftExcelId) {
+      return res.status(404).json({ error: "No draft found." });
+    }
+
+    const sheetResult = await sql`
+      SELECT highlight_rows
+      FROM excel_sheets
+      WHERE excel_id = ${draftExcelId} AND user_id = ${userId}
+    `;
+    if (sheetResult.length === 0) {
+      return res.status(404).json({ error: "Draft not found or unauthorized access." });
+    }
+    const highlightRows = sheetResult[0].highlight_rows || [];
+
+    const dataResults = await sql`
+      SELECT field_key, field_value
+      FROM excel_data
+      WHERE excel_id = ${draftExcelId}
+    `;
+    const jsonData = dataResults.map((row) => ({
+      field_key: row.field_key,
+      field_value: row.field_value,
+    }));
+
+    res.json({ data: jsonData, highlightRows });
+  } catch (error) {
+    console.error("Error fetching draft:", error);
+    res.status(500).json({ error: "Error fetching draft from database." });
+  }
+});
+
+
 
 // Start server
 app.listen(PORT, () => {
