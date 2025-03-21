@@ -199,13 +199,21 @@ app.get("/api/getPBUData/:excelId", authenticateToken, async (req, res) => {
 });
 
 // Save data to database
+
 app.post("/api/saveFiles", authenticateToken, async (req, res) => {
   const userId = req.user.id;
   const { data, highlightRows } = req.body;
+
   if (!data || data.length === 0) {
     return res.status(400).json({ error: "Invalid or empty data provided." });
   }
+
   try {
+    // Step 1: Get the current draft_excel_id
+    const userResult = await sql`SELECT draft_excel_id FROM users WHERE id = ${userId}`;
+    const draftExcelId = userResult[0]?.draft_excel_id;
+
+    // Step 2: Save the new file
     const sheetResult = await sql`
       INSERT INTO excel_sheets (user_id, highlight_rows)
       VALUES (${userId}, ${highlightRows ? JSON.stringify(highlightRows) : '[]'})
@@ -220,8 +228,13 @@ app.post("/api/saveFiles", authenticateToken, async (req, res) => {
     }));
     await sql`INSERT INTO excel_data ${sql(dataToInsert)}`;
 
-    // Clear the draft
-    await sql`UPDATE users SET draft_excel_id = NULL WHERE id = ${userId}`;
+    // Step 3: Delete the draft if it exists
+    if (draftExcelId) {
+      await sql`DELETE FROM excel_sheets WHERE excel_id = ${draftExcelId}`;
+      // This deletes the draft from excel_sheets.
+      // Related excel_data rows are deleted via ON DELETE CASCADE.
+      // draft_excel_id in users is set to NULL via ON DELETE SET NULL.
+    }
 
     res.json({ success: true, message: "File saved successfully", excelId });
   } catch (error) {
@@ -229,6 +242,7 @@ app.post("/api/saveFiles", authenticateToken, async (req, res) => {
     res.status(500).json({ error: "Error saving data to the database." });
   }
 });
+
 
 app.post("/api/saveDraft", authenticateToken, async (req, res) => {
   const userId = req.user.id;
