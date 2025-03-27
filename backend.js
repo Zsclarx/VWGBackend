@@ -27,16 +27,16 @@ app.use(
 );
 
 // JWT Middleware
-const authenticateToken = (req, res, next) => {
-  const token = req.header("Authorization");
-  if (!token) return res.status(401).json({ message: "Unauthorized" });
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: "Invalid token" });
-    req.user = user; // Now contains { id, brand, role }
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader;
+  if (!token) return res.status(401).json({ message: 'No token provided' });
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ message: 'Invalid token' });
+    req.user = user;
     next();
   });
-};
+}
 
 // Fetch spreadsheet data from local file (unchanged)
 app.get("/api/getSpreadsheetData", (req, res) => {
@@ -72,7 +72,6 @@ app.get("/api/getSpreadsheetData", (req, res) => {
 app.post("/register", async (req, res) => {
   const { brand, role, password } = req.body;
   const hashedPassword = await bcrypt.hash(password, 10);
-
   try {
     await sql`INSERT INTO users (brand, role, password_hash) VALUES (${brand}, ${role}, ${hashedPassword})`;
     res.status(201).json({ message: "User registered successfully" });
@@ -85,26 +84,21 @@ app.post("/register", async (req, res) => {
 // Login API
 app.post("/login", async (req, res) => {
   const { brand, role, password } = req.body;
-
   try {
     const results = await sql`SELECT * FROM users WHERE brand = ${brand} AND role = ${role}`;
     if (results.length === 0) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
-
     const user = results[0];
     const validPassword = await bcrypt.compare(password, user.password_hash);
-
     if (!validPassword) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
-
     const token = jwt.sign(
       { id: user.id, brand: user.brand, role: user.role },
-      process.env.JWT_SECRET,
+      JWT_SECRET,
       { expiresIn: "1h" }
     );
-
     res.json({ token });
   } catch (error) {
     console.error("Error during login:", error);
@@ -112,6 +106,20 @@ app.post("/login", async (req, res) => {
   }
 });
 
+// Get User Details API
+app.get("/api/getUserDetails", authenticateToken, async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const results = await sql`SELECT brand, role FROM users WHERE id = ${userId}`;
+    if (results.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json(results[0]);
+  } catch (error) {
+    console.error("Error fetching user details:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
 // Fetch user-specific Excel sheets
 app.get("/excel-sheets", authenticateToken, async (req, res) => {
   const userId = req.user.id;
