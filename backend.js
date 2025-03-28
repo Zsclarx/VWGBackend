@@ -22,7 +22,7 @@ const sql = postgres(connectionString);
 app.use(bodyParser.json());
 app.use(
   cors({
-    origin: ["https://vwg-frontend.vercel.app", "http://localhost:3000"],
+    origin: ["https://vwg-frontend.vercel.app", "http://localhost:3000","https://vwg-frontend-alpha.vercel.app"],
   })
 );
 
